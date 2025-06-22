@@ -1,0 +1,8 @@
+streamlit
+jira
+langchain
+langchain-openai
+openai
+pydantic
+tqdm
+python-dotenv
