@@ -5,7 +5,6 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import requests
 from requests.auth import HTTPBasicAuth
-import os
 
 st.set_page_config(page_title="Business Value Assessment AI", layout="wide")
 st.title("📊 Business Value Assessment AI")
@@ -51,7 +50,7 @@ Justification: <your justification>
 def clear_connection_state():
     for k in [
         "jira_host", "jira_email", "jira_api_token", "jira_project_key",
-        "openai_api_key", "connected", "custom_field_id", "last_assessment",
+        "connected", "custom_field_id", "last_assessment",
         "last_selected_issue_key"
     ]:
         if k in st.session_state:
@@ -67,26 +66,23 @@ if st.session_state.get("connected", False):
 
 # --- CONNECTION FORM ---
 if not st.session_state.get("connected", False):
-    st.subheader("Connect to Jira & OpenAI")
+    st.subheader("Connect to Jira")
     with st.form("connection_form"):
         jira_host = st.text_input("Jira Host URL (e.g. https://yourdomain.atlassian.net)", value=st.session_state.get("jira_host", ""))
         jira_email = st.text_input("Jira Email", value=st.session_state.get("jira_email", ""))
         jira_api_token = st.text_input("Jira API Token", type="password", value=st.session_state.get("jira_api_token", ""))
         jira_project_key = st.text_input("Jira Project Key", value=st.session_state.get("jira_project_key", ""))
-        openai_api_key = st.text_input("OpenAI API Key", type="password", value=st.session_state.get("openai_api_key", ""))
         submitted = st.form_submit_button("Connect")
 
     if submitted:
         # Basic validation
-        if not (jira_host and jira_email and jira_api_token and jira_project_key and openai_api_key):
+        if not (jira_host and jira_email and jira_api_token and jira_project_key):
             st.warning("Please fill in all fields to connect.")
         else:
             st.session_state["jira_host"] = jira_host.strip()
             st.session_state["jira_email"] = jira_email.strip()
             st.session_state["jira_api_token"] = jira_api_token.strip()
             st.session_state["jira_project_key"] = jira_project_key.strip()
-            st.session_state["openai_api_key"] = openai_api_key.strip()
-            # Try connection
             try:
                 jira = JIRA(server=jira_host, basic_auth=(jira_email, jira_api_token))
                 st.session_state["connected"] = True
@@ -101,7 +97,6 @@ if st.session_state.get("connected", False):
     jira_email = st.session_state["jira_email"]
     jira_api_token = st.session_state["jira_api_token"]
     jira_project_key = st.session_state["jira_project_key"]
-    openai_api_key = st.session_state["openai_api_key"]
 
     # --- Custom Field Creation/Retrieval ---
     def get_custom_field_id(field_name):
@@ -145,7 +140,6 @@ if st.session_state.get("connected", False):
             st.success(f"Custom field '{FIELD_NAME}' created in Jira.")
             custom_field_id = new_field_id
         else:
-            # Try fetching again in case it was created by another process
             custom_field_id = get_custom_field_id(FIELD_NAME)
             if custom_field_id:
                 st.info(f"Custom field '{FIELD_NAME}' already exists in Jira.")
@@ -208,7 +202,7 @@ if st.session_state.get("connected", False):
                     with st.spinner("Assessing with AI..."):
                         llm = ChatOpenAI(
                             model="gpt-4o",
-                            openai_api_key=openai_api_key,
+                            api_key=st.secrets["OPENAI_API_KEY"],
                             temperature=0.2,
                             max_tokens=1024
                         )
