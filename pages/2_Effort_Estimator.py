@@ -3,7 +3,6 @@ from jira import JIRA
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-import os
 
 st.set_page_config(page_title="AI Effort Estimator", layout="wide")
 st.title("📏 AI-Based Effort Estimator for Jira Stories")
@@ -28,20 +27,18 @@ Output (use this format):
 ---
 """
 
-# ---- Utility Functions ----
 def clear_connection_state():
     for k in [
         "jira_host", "jira_email", "jira_api_token", "jira_project_key",
-        "openai_api_key", "connected"
+        "connected"
     ]:
         if k in st.session_state:
             del st.session_state[k]
 
-def get_llm(api_key):
-    return ChatOpenAI(model="gpt-4o", temperature=0, api_key=api_key)
+def get_llm():
+    return ChatOpenAI(model="gpt-4o", temperature=0, api_key=st.secrets["OPENAI_API_KEY"])
 
 def parse_estimator_output(output):
-    # Robustly parse the LLM output for fields.
     import re
     range_ = ""
     confidence = ""
@@ -58,7 +55,6 @@ def parse_estimator_output(output):
     return range_, confidence, reasoning
 
 def get_similar_stories(jira, project_key, component, current_issue_key=None, n=5):
-    # Pull most recent issues with story points, same component preferred
     jql = (
         f'project={project_key} AND "Story Points" is not EMPTY '
         f'AND component="{component}" ORDER BY updated DESC'
@@ -87,25 +83,22 @@ if st.session_state.get("connected", False):
 
 # ---- Connection Form ----
 if not st.session_state.get("connected", False):
-    st.subheader("Connect to Jira & OpenAI")
+    st.subheader("Connect to Jira")
     with st.form("connection_form"):
         jira_host = st.text_input("Jira Host URL (e.g. https://yourdomain.atlassian.net)", value=st.session_state.get("jira_host", ""))
         jira_email = st.text_input("Jira Email", value=st.session_state.get("jira_email", ""))
         jira_api_token = st.text_input("Jira API Token", type="password", value=st.session_state.get("jira_api_token", ""))
         jira_project_key = st.text_input("Jira Project Key", value=st.session_state.get("jira_project_key", ""))
-        openai_api_key = st.text_input("OpenAI API Key", type="password", value=st.session_state.get("openai_api_key", ""))
         submitted = st.form_submit_button("Connect")
 
     if submitted:
-        if not (jira_host and jira_email and jira_api_token and jira_project_key and openai_api_key):
+        if not (jira_host and jira_email and jira_api_token and jira_project_key):
             st.warning("Please fill in all fields to connect.")
         else:
             st.session_state["jira_host"] = jira_host.strip()
             st.session_state["jira_email"] = jira_email.strip()
             st.session_state["jira_api_token"] = jira_api_token.strip()
             st.session_state["jira_project_key"] = jira_project_key.strip()
-            st.session_state["openai_api_key"] = openai_api_key.strip()
-            # Test Jira connection
             try:
                 jira = JIRA(server=jira_host, basic_auth=(jira_email, jira_api_token))
                 st.session_state["connected"] = True
@@ -126,11 +119,9 @@ if st.session_state.get("connected", False):
     jira_email = st.session_state["jira_email"]
     jira_api_token = st.session_state["jira_api_token"]
     jira_project_key = st.session_state["jira_project_key"]
-    openai_api_key = st.session_state["openai_api_key"]
 
     try:
         jira = JIRA(server=jira_host, basic_auth=(jira_email, jira_api_token))
-        # Find stories that do not have "Story Points" assigned
         jql = f'project={jira_project_key} AND issuetype=Story AND "Story Points" is EMPTY ORDER BY created ASC'
         issues = jira.search_issues(jql, maxResults=20)
     except Exception as e:
@@ -157,7 +148,7 @@ if st.session_state.get("connected", False):
                 with st.spinner("Fetching similar stories and estimating..."):
                     similar_examples = get_similar_stories(jira, jira_project_key, component, current_issue_key=selected_issue.key, n=5)
                     chain = LLMChain(
-                        llm=get_llm(openai_api_key),
+                        llm=get_llm(),
                         prompt=PromptTemplate.from_template(ESTIMATOR_PROMPT)
                     )
                     try:
@@ -185,11 +176,9 @@ if st.session_state.get("connected", False):
                 )
                 if st.form_submit_button("Save to Jira"):
                     try:
-                        # Find the "Story Points" customfield key in your Jira instance. Often it's customfield_10016.
                         story_points_field = "customfield_10016"
                         selected_issue.update(fields={story_points_field: float(final_estimate)})
                         st.success(f"Story points updated to {final_estimate} for {selected_issue.key}!")
-                        # Clear state for next use
                         for k in ["last_est_range", "last_confidence", "last_reasoning"]:
                             if k in st.session_state:
                                 del st.session_state[k]
