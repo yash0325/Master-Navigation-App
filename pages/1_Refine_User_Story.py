@@ -4,7 +4,6 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import re
-import os
 
 st.set_page_config(page_title="User Story Refiner AI", layout="wide")
 st.title("📘 User Story Refiner AI")
@@ -32,13 +31,13 @@ Output (in this format):
 def clear_connection_state():
     for k in [
         "jira_host", "jira_email", "jira_api_token", "jira_project_key",
-        "openai_api_key", "connected", "last_refined_summary",
+        "connected", "last_refined_summary",
         "last_refined_criteria", "last_selected_issue_key"
     ]:
         if k in st.session_state:
             del st.session_state[k]
 
-# --- DISCONNECT BUTTON (ALWAYS AT TOP RIGHT IF CONNECTED) ---
+# --- DISCONNECT BUTTON (TOP RIGHT IF CONNECTED) ---
 if st.session_state.get("connected", False):
     colc, cold = st.columns([10, 1])
     with cold:
@@ -46,28 +45,24 @@ if st.session_state.get("connected", False):
             clear_connection_state()
             st.rerun()
 
-# ---- Step 1: Jira/OpenAI Connection Form ----
+# ---- Step 1: Jira Connection Form ----
 if not st.session_state.get("connected", False):
-    st.subheader("Connect to Jira & OpenAI")
+    st.subheader("Connect to Jira")
     with st.form("connection_form"):
         jira_host = st.text_input("Jira Host URL (e.g. https://yourdomain.atlassian.net)", value=st.session_state.get("jira_host", ""))
         jira_email = st.text_input("Jira Email", value=st.session_state.get("jira_email", ""))
         jira_api_token = st.text_input("Jira API Token", type="password", value=st.session_state.get("jira_api_token", ""))
         jira_project_key = st.text_input("Jira Project Key", value=st.session_state.get("jira_project_key", ""))
-        openai_api_key = st.text_input("OpenAI API Key", type="password", value=st.session_state.get("openai_api_key", ""))
         submitted = st.form_submit_button("Connect")
 
     if submitted:
-        # Basic validation
-        if not (jira_host and jira_email and jira_api_token and jira_project_key and openai_api_key):
+        if not (jira_host and jira_email and jira_api_token and jira_project_key):
             st.warning("Please fill in all fields to connect.")
         else:
             st.session_state["jira_host"] = jira_host.strip()
             st.session_state["jira_email"] = jira_email.strip()
             st.session_state["jira_api_token"] = jira_api_token.strip()
             st.session_state["jira_project_key"] = jira_project_key.strip()
-            st.session_state["openai_api_key"] = openai_api_key.strip()
-            # Try connection immediately
             try:
                 jira = JIRA(server=jira_host, basic_auth=(jira_email, jira_api_token))
                 st.session_state["connected"] = True
@@ -88,10 +83,9 @@ if st.session_state.get("connected", False):
     jira_email = st.session_state["jira_email"]
     jira_api_token = st.session_state["jira_api_token"]
     jira_project_key = st.session_state["jira_project_key"]
-    openai_api_key = st.session_state["openai_api_key"]
 
-    def get_llm(api_key):
-        return ChatOpenAI(model="gpt-4o", temperature=0, api_key=api_key)
+    def get_llm():
+        return ChatOpenAI(model="gpt-4o", temperature=0, api_key=st.secrets["OPENAI_API_KEY"])
 
     def parse_refined_output(output):
         lines = output.splitlines()
@@ -161,7 +155,7 @@ if st.session_state.get("connected", False):
                 if submitted:
                     with st.spinner("Refining with AI..."):
                         chain = LLMChain(
-                            llm=get_llm(openai_api_key),
+                            llm=get_llm(),
                             prompt=PromptTemplate.from_template(REFINER_PROMPT)
                         )
                         try:
