@@ -3,11 +3,11 @@ from jira import JIRA
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-import re
 
 st.set_page_config(page_title="User Story Refiner AI", layout="wide")
 st.title("📘 User Story Refiner AI")
 
+# ---- PROMPTS ----
 REFINER_PROMPT = """
 You are a User Story Refiner Agent. Given a user story or backlog item (which may be unclear, incomplete, or poorly written), your tasks are:
 1. Rewrite the story for clarity and completeness using the INVEST criteria.
@@ -28,11 +28,44 @@ Output (in this format):
 ---
 """
 
+TASK_BREAKDOWN_PROMPT = """
+You are a software analyst. Given the following user story and its acceptance criteria, break it down into a clear, actionable list of implementation tasks for the development team.
+
+User Story:
+{user_story}
+
+Acceptance Criteria:
+{acceptance_criteria}
+
+Output (as a bullet list of tasks):
+-
+"""
+
+# ---- JIRA SUB-TASK HELPERS ----
+def get_subtask_issue_type(jira, project_key):
+    """Get the sub-task issue type name for the project."""
+    project = jira.project(project_key)
+    for issue_type in project.issueTypes:
+        if issue_type.subtask:
+            return issue_type.name
+    raise Exception("Sub-task issue type not found in this project!")
+
+def create_jira_subtask(jira, parent_issue_key, summary, project_key, subtask_issue_type):
+    """Create a sub-task under the specified parent."""
+    issue_dict = {
+        'project': {'key': project_key},
+        'parent': {'key': parent_issue_key},
+        'summary': summary[:255],
+        'description': '',
+        'issuetype': {'name': subtask_issue_type},
+    }
+    return jira.create_issue(fields=issue_dict)
+
 def clear_connection_state():
     for k in [
         "jira_host", "jira_email", "jira_api_token", "jira_project_key",
         "connected", "last_refined_summary",
-        "last_refined_criteria", "last_selected_issue_key"
+        "last_refined_criteria", "last_selected_issue_key", "last_task_breakdown", "last_task_breakdown_lines"
     ]:
         if k in st.session_state:
             del st.session_state[k]
@@ -71,7 +104,6 @@ if not st.session_state.get("connected", False):
                 st.session_state["connected"] = False
                 st.error(f"Failed to connect to Jira: {e}")
 else:
-    # Connected UI banner
     st.success(
         f"Connected as {st.session_state['jira_email']} to JIRA: {st.session_state['jira_project_key']}",
         icon="🔗"
@@ -198,5 +230,68 @@ if st.session_state.get("connected", False):
                         st.success(f"Issue {selected_issue.key} updated in Jira!")
                     except Exception as e:
                         st.error(f"Failed to update Jira: {e}")
+
+            # --------- BREAK DOWN INTO TASKS FEATURE ---------
+            if (
+                st.session_state.get("last_refined_summary")
+                and st.session_state.get("last_selected_issue_key") == selected_issue.key
+            ):
+                if st.button("🛠️ Break Down Into Tasks"):
+                    with st.spinner("Breaking down into tasks..."):
+                        chain = LLMChain(
+                            llm=get_llm(),
+                            prompt=PromptTemplate.from_template(TASK_BREAKDOWN_PROMPT)
+                        )
+                        tasks_output = chain.run({
+                            "user_story": st.session_state["last_refined_summary"],
+                            "acceptance_criteria": st.session_state["last_refined_criteria"]
+                        })
+                        st.markdown("**Implementation Tasks:**")
+                        task_lines = [line.lstrip('- ').strip() for line in tasks_output.strip().splitlines() if line.strip()]
+                        for task in task_lines:
+                            st.checkbox(task, key=task)
+                        st.session_state["last_task_breakdown"] = "\n".join([f"- [ ] {task}" for task in task_lines])
+                        st.session_state["last_task_breakdown_lines"] = task_lines  # <-- Store the list for sub-task creation
+
+                # ------ BUTTON TO CREATE SUB-TASKS ------
+                if st.session_state.get("last_task_breakdown_lines"):
+                    if st.button("📎 Create Jira Sub-tasks", key="create_jira_subtasks_btn"):
+                        try:
+                            subtask_issue_type = get_subtask_issue_type(jira, jira_project_key)
+                            parent_issue_key = selected_issue.key
+                            created_keys = []
+                            for task_summary in st.session_state["last_task_breakdown_lines"]:
+                                new_issue = create_jira_subtask(
+                                    jira,
+                                    parent_issue_key=parent_issue_key,
+                                    summary=task_summary,
+                                    project_key=jira_project_key,
+                                    subtask_issue_type=subtask_issue_type,
+                                )
+                                created_keys.append(new_issue.key)
+                            st.success(f"Created sub-tasks: {', '.join(created_keys)}")
+                        except Exception as e:
+                            st.error(f"Failed to create sub-tasks: {e}")
+
+                # ------ Optional: Also keep "Update Jira with Tasks" if you want old behavior ------
+                if st.session_state.get("last_task_breakdown"):
+                    if st.button("📋 Update Jira with Tasks", key="update_jira_tasks_btn"):
+                        refined_description = (
+                            f"**Refined User Story:**  {st.session_state['last_refined_summary']}\n\n"
+                            f"**Acceptance Criteria:**  \n"
+                            f"- " + "\n- ".join(st.session_state['last_refined_criteria'].splitlines()) +
+                            "\n\n**Implementation Tasks:**\n" +
+                            st.session_state["last_task_breakdown"] +
+                            "\n\n_Refined and broken down by AI agent_"
+                        )
+                        try:
+                            jira.issue(selected_issue.key).update(
+                                summary=st.session_state['last_refined_summary'][:255],
+                                description=refined_description
+                            )
+                            st.success(f"Issue {selected_issue.key} updated in Jira with tasks!")
+                        except Exception as e:
+                            st.error(f"Failed to update Jira: {e}")
+
     else:
         st.warning("No issues found in the selected project.")
