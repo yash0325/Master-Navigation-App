@@ -1,8 +1,8 @@
 import streamlit as st
 from jira import JIRA
 from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableSequence
 
 st.set_page_config(page_title="User Story Refiner AI", layout="wide")
 st.title("📘 User Story Refiner AI")
