@@ -1,8 +1,8 @@
 import streamlit as st
 from jira import JIRA
 from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableSequence
 import requests
 from requests.auth import HTTPBasicAuth
 
